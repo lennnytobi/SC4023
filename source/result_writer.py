@@ -1,22 +1,10 @@
 """
-result_writer.py - Generic CSV writer for query results from a ColumnStore.
-
-Writes matching rows to a CSV file using late materialization — string
-columns are decoded only for the rows being written, not for the entire
-dataset.
+result_writer.py - Write ColumnStore query results to a CSV file.
 """
 
 
 def write_query_results(filepath, store, row_indices, columns=None):
-    """
-    Write rows from a ColumnStore to a CSV file.
-
-    Args:
-        filepath: Output file path.
-        store: ColumnStore containing the data.
-        row_indices: List of row indices to write.
-        columns: List of column names to include. If None, all columns.
-    """
+    """Write selected rows from a ColumnStore to a CSV file."""
     if columns is None:
         columns = store.column_names()
 

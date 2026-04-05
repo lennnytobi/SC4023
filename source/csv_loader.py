@@ -1,9 +1,7 @@
 """
-csv_loader.py - Generic CSV file parser for column-oriented data loading.
+csv_loader.py - Loads a CSV file into a ColumnStore.
 
-Loads any CSV file into a ColumnStore. Column types can be specified via
-a schema dict, or auto-detected from the data. Works with any CSV
-regardless of column names, order, or count.
+Column types can be provided via a schema dict or auto-detected from the data.
 """
 
 import csv
@@ -11,11 +9,7 @@ from column_store import ColumnStore
 
 
 def _auto_detect_type(value):
-    """
-    Attempt to detect whether a string value is int, float, or str.
-
-    Tries int first, then float, falls back to str.
-    """
+    """Detect type of a string value: tries int, then float, then str."""
     try:
         int(value)
         return "int"
@@ -30,19 +24,8 @@ def _auto_detect_type(value):
 
 def _detect_schema(filepath, sample_rows=100):
     """
-    Auto-detect column types by sampling the first N rows of a CSV.
-
-    For each column, checks if all sampled values are int, float, or str.
-    If mixed numeric types exist, promotes to float. If any non-numeric
-    value is found, the column becomes str.
-
-    Args:
-        filepath: Path to the CSV file.
-        sample_rows: Number of rows to sample for type detection.
-
-    Returns:
-        Tuple of (header_list, schema_dict) where schema maps
-        column_name -> "int" | "float" | "str".
+    Auto-detect column types by sampling the first N rows.
+    Returns (header_list, schema_dict) where schema maps column -> type.
     """
     with open(filepath, "r", encoding="utf-8") as f:
         reader = csv.reader(f)
@@ -80,25 +63,14 @@ def _cast_value(raw, col_type):
     elif col_type == "float":
         return float(raw)
     else:
-        return raw  # str — will be dictionary-encoded by ColumnStore
+        return raw  # str columns are dictionary-encoded by ColumnStore
 
 
 def load_csv(filepath, schema=None):
     """
-    Load any CSV file into a generic ColumnStore.
-
-    If a schema is provided, it maps column_name -> type ("int", "float",
-    "str"). If not provided, types are auto-detected from the data.
-
-    Args:
-        filepath: Path to the CSV file.
-        schema: Optional dict mapping column_name -> "int"|"float"|"str".
-                If None, types are auto-detected.
-
-    Returns:
-        A populated ColumnStore instance.
+    Load a CSV file into a ColumnStore.
+    schema maps column_name -> "int"|"float"|"str". Auto-detected if None.
     """
-    # Detect or use provided schema
     if schema is None:
         header, schema = _detect_schema(filepath)
     else:
@@ -106,10 +78,9 @@ def load_csv(filepath, schema=None):
             reader = csv.reader(f)
             header = [col.strip() for col in next(reader)]
 
-    # Initialize the column store with the detected/provided schema
     store = ColumnStore()
     for name in header:
-        col_type = schema.get(name, "str")  # default to str if not in schema
+        col_type = schema.get(name, "str")
         store.add_column(name, col_type)
 
     min_cols = len(header)
@@ -118,7 +89,7 @@ def load_csv(filepath, schema=None):
     col_arrays = [store._columns[name] for name in header]
     dicts = [store._dictionaries.get(name) for name in header]
 
-    # Load all rows (fast path: append directly to column arrays)
+    # Append directly to column arrays for speed (bypass append_row overhead)
     with open(filepath, "r", encoding="utf-8", newline="") as f:
         reader = csv.reader(f)
         next(reader)  # skip header

@@ -1,15 +1,10 @@
 """
-column_store.py - Generic column-oriented database engine.
-
-A self-contained column store with a chainable query API, similar to
-pandas or SQL but implemented from scratch using column-oriented storage.
+column_store.py - Generic column-oriented storage and query engine.
 
 Usage:
     store = ColumnStore()
     store.add_column("price", "float")
     store.add_column("town", "str")
-    ...
-    # Chainable queries:
     result = (store.query()
         .filter("year", "==", 2020)
         .filter("town", "in", ["BEDOK", "CLEMENTI"])
@@ -18,10 +13,7 @@ Usage:
 """
 
 class Dictionary:
-    """
-    Dictionary encoding for string columns.
-    Maps string values to integer codes for compact, fast storage.
-    """
+    """Maps string values to integer codes for compact storage."""
 
     def __init__(self):
         self._str_to_code = {}
@@ -49,11 +41,10 @@ class Dictionary:
 
 class ColumnStore:
     """
-    Generic column-oriented storage and query engine.
+    Column-oriented storage and query engine.
 
-    Each column is a Python list stored by name. String columns are
-    dictionary-encoded automatically. Supports derived columns,
-    late materialization, and a chainable query API.
+    Stores each column as a list. String columns are dictionary-encoded.
+    Supports derived columns, zone maps, and a chainable query API.
     """
 
     TYPE_INT = "int"
@@ -69,7 +60,7 @@ class ColumnStore:
         self._zone_maps = {}
         self._zone_size = None
 
-    # ---- Schema & loading ----
+    # Schema and loading
 
     def _invalidate_zone_maps(self):
         self._zone_maps = {}
@@ -136,9 +127,7 @@ class ColumnStore:
             self._invalidate_zone_maps()
 
     def build_zone_maps(self, zone_size=4096, columns=None):
-        """
-        Build min-max zone maps for selected columns.
-        """
+        """Build min-max zone maps for selected columns."""
         if zone_size <= 0:
             raise ValueError("zone_size must be > 0")
 
@@ -185,9 +174,7 @@ class ColumnStore:
         return rows
 
     def zone_mask_for_predicate(self, col_name, op, value):
-        """
-        Return a bool mask of zones that may contain matches.
-        """
+        """Return a bool mask of zones that may contain matches."""
         if col_name not in self._zone_maps:
             return None
 
@@ -217,7 +204,7 @@ class ColumnStore:
             mask.append(keep)
         return mask
 
-    # ---- Access ----
+    # Access
 
     def get_column(self, name):
         """Get raw column list by name (encoded ints for str columns)."""
@@ -253,7 +240,7 @@ class ColumnStore:
         return {name: self.get_decoded(name, row_idx)
                 for name in self._col_order}
 
-    # ---- Query API ----
+    # Query API
 
     def query(self):
         """Start a chainable query. Returns a Query object."""
@@ -261,19 +248,7 @@ class ColumnStore:
 
 
 class Query:
-    """
-    Chainable query builder for ColumnStore.
-
-    Supports filtering, selection, aggregation (min/max/sum/avg/count),
-    and result retrieval — all operating on column arrays.
-
-    Example:
-        store.query()
-            .filter("year", "==", 2020)
-            .filter("town", "in", ["BEDOK", "CLEMENTI"])
-            .filter("area", ">=", 85)
-            .min("price_per_sqm")
-    """
+    """Chainable query builder for ColumnStore (filter, aggregate, select)."""
 
     def __init__(self, store):
         self._store = store
@@ -283,45 +258,18 @@ class Query:
         """
         Add a filter predicate. Returns self for chaining.
 
-        Supported operators:
-            "==" / "="    : equals
-            "!=" / "<>"   : not equals
-            ">"           : greater than
-            ">="          : greater than or equal
-            "<"           : less than
-            "<="          : less than or equal
-            "in"          : value is in a collection
-            "not_in"      : value is not in a collection
-
-        For string columns, comparisons use dictionary codes internally
-        for speed. The caller passes human-readable values — the query
-        engine resolves them to codes automatically.
-
-        Args:
-            col_name: Column name to filter on.
-            op: Comparison operator string.
-            value: Value to compare against (or collection for "in"/"not_in").
-
-        Returns:
-            self (for chaining).
+        Supported ops: "==" "!=" ">" ">=" "<" "<=" "in" "not_in"
+        String columns are resolved to dictionary codes automatically.
         """
         self._predicates.append((col_name, op, value))
         return self
 
     def _build_mask(self):
-        """
-        Build a boolean mask by applying all predicates column-at-a-time.
-
-        For each predicate, iterates only the relevant column (not full rows).
-        String columns are compared using dictionary codes for speed.
-
-        Returns:
-            List of row indices that pass all predicates.
-        """
+        """Apply all predicates and return list of matching row indices."""
         store = self._store
         n = store.num_rows
 
-        # Zone-map pruning first (if available), then row-level filtering.
+        # Zone-map pruning first, then row-level filtering.
         if store.has_zone_maps() and n > 0:
             zone_mask = [True] * store.zone_count()
 
@@ -374,14 +322,14 @@ class Query:
             if dictionary and op in ("==", "="):
                 code = dictionary.get_code(value)
                 if code == -1:
-                    return []  # value not in dictionary — no matches
+                    return []  # value not in dictionary, no matches
                 surviving = [i for i in surviving if col[i] == code]
                 continue
 
             if dictionary and op in ("!=", "<>"):
                 code = dictionary.get_code(value)
                 if code == -1:
-                    continue  # value not in dict — all rows pass
+                    continue  # value not in dict, all rows pass
                 surviving = [i for i in surviving if col[i] != code]
                 continue
 
@@ -431,12 +379,7 @@ class Query:
         return surviving
 
     def execute(self):
-        """
-        Execute the query. Returns list of matching row indices.
-
-        These indices can be used with store.materialize_row(idx) or
-        store.get_decoded(col, idx) to retrieve values.
-        """
+        """Execute the query and return list of matching row indices."""
         return self._build_mask()
 
     def count(self):
@@ -444,12 +387,7 @@ class Query:
         return len(self._build_mask())
 
     def min(self, col_name):
-        """
-        Find the row with the minimum value in col_name among matches.
-
-        Returns:
-            (row_index, min_value) or (None, None) if no matches.
-        """
+        """Return (row_index, min_value) for matching rows, or (None, None)."""
         indices = self._build_mask()
         if not indices:
             return None, None
@@ -463,12 +401,7 @@ class Query:
         return best_idx, best_val
 
     def max(self, col_name):
-        """
-        Find the row with the maximum value in col_name among matches.
-
-        Returns:
-            (row_index, max_value) or (None, None) if no matches.
-        """
+        """Return (row_index, max_value) for matching rows, or (None, None)."""
         indices = self._build_mask()
         if not indices:
             return None, None
@@ -499,15 +432,7 @@ class Query:
         return total / len(indices)
 
     def select(self, columns=None):
-        """
-        Return matching rows as a list of dicts (with decoded strings).
-
-        Args:
-            columns: List of column names to include. If None, all columns.
-
-        Returns:
-            List of dicts, one per matching row.
-        """
+        """Return matching rows as a list of dicts. Defaults to all columns."""
         indices = self._build_mask()
         store = self._store
         if columns is None:
@@ -518,11 +443,7 @@ class Query:
         ]
 
     def to_column_store(self):
-        """
-        Return matching rows as a new ColumnStore.
-
-        Useful for creating a filtered subset for further processing.
-        """
+        """Return matching rows as a new ColumnStore."""
         indices = self._build_mask()
         store = self._store
         new_store = ColumnStore()

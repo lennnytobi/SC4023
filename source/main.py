@@ -1,9 +1,5 @@
 """
-main.py - Entry point for the HDB Resale Flat Column-Store Query Engine.
-
-This file contains the HDB-specific application logic that sits on top
-of the generic column store engine. The column store, CSV loader, query
-builder, and vectorized loader are all fully generic and reusable.
+main.py - HDB Resale Flat Column-Store Query Engine entry point.
 
 Usage:
     python3 main.py <matriculation_number> [csv_file_path]
@@ -104,10 +100,7 @@ def parse_matric(matric_num):
 
 
 def post_load_transform(store):
-    """
-    Parse month column into separate year/month_num columns, and compute
-    the price_per_sqm derived column.
-    """
+    """Add year, month_num, and price_per_sqm derived columns."""
     n = store.num_rows
     years, month_nums = [], []
     for i in range(n):
@@ -207,9 +200,7 @@ def main():
         threshold=THRESHOLD, range_cap=12,
     )
 
-    # ---- Demo: Generic Query API ----
-    # This shows the column store works like a database / pandas.
-    # The same API can query any dataset loaded into the store.
+    # Demo: Generic Query API
     print("=" * 50)
     print("DEMO: Generic Query API")
     print("=" * 50)
@@ -226,7 +217,7 @@ def main():
     print(f"  Zone maps enabled: {use_zone_maps}")
     print()
 
-    # Example: use the generic query API just like pandas/SQL
+    # Example: min price_per_sqm with filters
     print("Example query: MIN(price_per_sqm) WHERE year=2020, "
           "month in [6,8], town in matched, area >= 85")
     row_idx, min_val = (store.query()
@@ -261,7 +252,7 @@ def main():
               f"${avg:,.0f}")
     print()
 
-    # ---- Mode 1: Optimized query ----
+    # Mode 1: Full Load + Optimized Query
     print("=" * 50)
     print("MODE 1: Full Load + Optimized Query")
     print("=" * 50)
@@ -280,7 +271,7 @@ def main():
     print(f"  Write time: {t_write:.3f}s")
     print()
 
-    # ---- Mode 2: Naive baseline ----
+    # Mode 2: Naive Baseline
     print("=" * 50)
     print("MODE 2: Naive Baseline (Generic Query API)")
     print("=" * 50)
@@ -302,7 +293,7 @@ def main():
         print(f"  Speedup: {t_naive / t_query:.1f}x faster with optimized")
     print()
 
-    # ---- Mode 3: Vectorized out-of-core (fair, chunked full pipeline) ----
+    # Mode 3: Vectorized (chunked full pipeline)
     print("=" * 50)
     print("MODE 3: Vectorized (Fair Chunked Full Pipeline)")
     print("=" * 50)
@@ -360,7 +351,7 @@ def main():
         print(f"  Differing keys: {sorted(diff)[:10]}...")
     print()
 
-    # ---- Summary ----
+    # Summary
     print("=" * 50)
     print("TIMING SUMMARY")
     print("=" * 50)

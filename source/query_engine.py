@@ -1,23 +1,15 @@
 """
-query_engine.py - General-purpose (x, y) grid scan over a column store.
+query_engine.py - (x, y) grid scan over a column store.
 
-Provides two implementations:
-1. run_query_naive(): Uses the generic Query API for each (x,y) — simple
-   but slow. Works with any column store and any set of filters.
-2. run_query(): Optimized with incremental range accumulation and sweep.
-   Uses raw column access for performance.
+For each (x, y) in the grid:
+    SELECT MIN(agg_col) WHERE <pre_filters>
+      AND range_col IN [range_start, range_start+x-1]
+      AND sweep_col >= y
+Keep results where rounded MIN <= threshold.
 
-Both produce identical results. The naive version shows the generic API
-in action; the optimized version shows what custom optimization can achieve.
-
-The query pattern is:
-    For each (x, y) in a grid:
-        SELECT MIN(agg_col) FROM store
-        WHERE <pre_filters>
-          AND range_col >= range_start
-          AND range_col <= range_start + x - 1
-          AND sweep_col >= y
-    Keep results where rounded MIN <= threshold.
+Two implementations:
+  run_query_naive: uses the Query API directly, simple but slow.
+  run_query: optimized with incremental range accumulation and sweep.
 """
 
 from collections import defaultdict
@@ -28,32 +20,8 @@ def run_query_naive(store, pre_filters,
                     sweep_col, y_min, y_max,
                     agg_col, threshold=None, range_cap=None):
     """
-    Naive baseline using the generic store.query() API.
-
-    For every (x, y) pair, builds a fresh query with all filters and
-    calls .min() — the simplest possible approach.
-
-    Parameters
-    ----------
-    store : ColumnStore
-    pre_filters : list of (col_name, op, value)
-        Static filters applied to every query (e.g. year==2020, town in [...]).
-    range_col : str
-        Column for the x-dimension expanding range.
-    range_start : int
-        Lower bound for range_col.
-    x_min, x_max : int
-        Grid bounds for x (range expansion steps).
-    sweep_col : str
-        Column for the y-dimension (>= threshold sweep).
-    y_min, y_max : int
-        Grid bounds for y.
-    agg_col : str
-        Column to compute MIN on.
-    threshold : number or None
-        If set, only keep results where round(min) <= threshold.
-    range_cap : int or None
-        If set, cap range_start + x - 1 at this value (e.g. 12 for months).
+    Naive baseline: builds a fresh query for every (x, y) pair and calls .min().
+    Simpler but slower than run_query.
     """
     results = {}
 
@@ -86,16 +54,12 @@ def run_query(store, pre_filters,
               sweep_col, y_min, y_max,
               agg_col, threshold=None, range_cap=None):
     """
-    Optimized query using raw column access for performance.
+    Optimized query using raw column access.
 
-    Two key optimizations over the naive approach:
+    Two key optimizations:
     1. Incremental range accumulation: x=2 reuses x=1 candidates.
-    2. Sweep with running min: answers all y values in O(max_sweep).
+    2. Sweep with running min: answers all y values in one pass.
 
-    Pre-filters are applied via the Query API to get candidate rows,
-    then the optimized x/y loop uses raw column arrays.
-
-    Parameters are the same as run_query_naive.
     Note: sweep_col must be an integer column (values used as array indices).
     """
     # Phase 1: Pre-filter candidates using the Query API
@@ -136,9 +100,7 @@ def run_query(store, pre_filters,
         if range_cap is not None:
             upper = min(upper, range_cap)
 
-        # Incrementally add newly included range values only.
-        # If upper is capped (e.g. x=7 and x=8 both map to month=12),
-        # this loop naturally adds nothing for later x values.
+        # Add only newly included range values (skips if upper is capped).
         for r in range(last_added_upper + 1, upper + 1):
             for idx in candidates_by_range.get(r, []):
                 sv = sweep_vals[idx]
